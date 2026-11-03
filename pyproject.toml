@@ -17,6 +17,9 @@ dependencies = [
     "wordcloud>=1.9.6",
 ]
 
+[project.scripts]
+chat-to-cloud = "chat_to_cloud.cli:main"
+
 [build-system]
 requires = ["uv_build>=0.9.28,<0.10.0"]
 build-backend = "uv_build"

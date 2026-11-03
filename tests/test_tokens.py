@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import pytest
+from PIL import Image, ImageChops, ImageDraw, ImageFont, features
+
+from chat_to_cloud import fonts
 from chat_to_cloud.tokens import display_form, tokens_by_message, tokens_for_language
 from chat_to_cloud.whatsapp import Message, read_chat
 
@@ -27,6 +31,26 @@ def test_farsi_tokens_are_filtered_and_shaped_for_display() -> None:
         display_form("قهوه"),
         display_form("کتاب"),
     ]
+
+
+def _render(text: str, layout: ImageFont.Layout | None = None) -> Image.Image:
+    font = ImageFont.truetype(fonts.font_path(fonts.ARABIC), 48, layout_engine=layout)
+    image = Image.new("L", (400, 100), 255)
+    ImageDraw.Draw(image).text((10, 10), text, font=font, fill=0)
+    return image
+
+
+@pytest.mark.fonts
+@pytest.mark.skipif(not features.check("raqm"), reason="needs Pillow with raqm")
+def test_display_form_renders_like_properly_shaped_text() -> None:
+    word = "کاپیتان"
+    # Reference: raqm given the logical text performs real bidi and shaping.
+    expected = _render(word, ImageFont.Layout.RAQM)
+
+    # WordCloud and the animations use Pillow's default layout engine.
+    actual = _render(display_form(word))
+
+    assert ImageChops.difference(actual, expected).getbbox() is None
 
 
 def test_emoji_tokens_keep_modifier_and_zwj_sequences(sample_chat: Path) -> None:

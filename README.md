@@ -3,12 +3,42 @@
 Generate word clouds from WhatsApp chat exports, separately for English
 words, Farsi words, and emoji.
 
+## Usage
+
+1. Export a chat from WhatsApp on your phone: open the chat, then
+   *More > Export chat > Without media*. This produces a file such as
+   `WhatsApp Chat with Alice.txt`. Exports from Android, with lines like
+   `7/4/19, 15:50 - Alice: Hello`, are supported.
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+   and, from this directory, run:
+
+```sh
+uv run chat-to-cloud static "chats/WhatsApp Chat with Alice.txt"
+```
+
+This writes one PNG per token set next to the chat file:
+`<chat>_en_wc.png` (English words), `<chat>_fa_wc.png` (Farsi words), and
+`<chat>_emoji_wc.png` (emoji). A token set with no tokens is skipped.
+
+Common options:
+
+- `--language en|fa|emoji|all`: render only one token set (default `all`).
+- `--output-dir DIR`: write outputs elsewhere.
+- `--width`, `--height`: image size (default 1600x1200).
+- `--seed N`: reproducible layout; by default each run differs.
+
+Several chat files can be given at once. Run `uv run chat-to-cloud --help`
+or `uv run chat-to-cloud static --help` for the full reference. The
+`chats/` and `output/` directories are git-ignored, so they are convenient
+places for exports and results.
+
 ## Fonts and licensing
 
 Fonts are not stored in this repository. Each is pinned to an immutable
 upstream URL and a SHA-256 checksum (see `src/chat_to_cloud/fonts.py`),
 downloaded on first use, and cached in the user data directory
-(`~/.local/share/chat-to-cloud/fonts` on Linux). Set
+(`~/.local/share/chat-to-cloud/fonts` on Linux). Run
+`uv run chat-to-cloud fetch-fonts` to download them ahead of time. Set
 `CHAT_TO_CLOUD_FONT_DIR` to use a different directory, for example on an
 offline machine where the files were copied by hand.
 
