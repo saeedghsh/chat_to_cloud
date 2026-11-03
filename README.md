@@ -1,7 +1,7 @@
 # chat-to-cloud
 
-Generate word clouds from WhatsApp chat exports, separately for English
-words, Farsi words, and emoji.
+Generate static and animated word clouds from WhatsApp chat exports,
+separately for English words, Farsi words, and emoji.
 
 ## Usage
 
@@ -16,7 +16,11 @@ words, Farsi words, and emoji.
 uv run chat-to-cloud static "chats/WhatsApp Chat with Alice.txt"
 ```
 
-This writes one PNG per token set next to the chat file:
+The first run creates the virtual environment and downloads the fonts.
+
+### Static images
+
+The `static` command writes one PNG per token set next to the chat file:
 `<chat>_en_wc.png` (English words), `<chat>_fa_wc.png` (Farsi words), and
 `<chat>_emoji_wc.png` (emoji). A token set with no tokens is skipped.
 
@@ -31,6 +35,30 @@ Several chat files can be given at once. Run `uv run chat-to-cloud --help`
 or `uv run chat-to-cloud static --help` for the full reference. The
 `chats/` and `output/` directories are git-ignored, so they are convenient
 places for exports and results.
+
+### Animations
+
+Two commands render MP4 videos of the cloud building up over the chat's
+history, with a footer showing the chat, the current date, and progress:
+
+```sh
+uv run chat-to-cloud animate "chats/WhatsApp Chat with Alice.txt"
+uv run chat-to-cloud animate-dynamic "chats/WhatsApp Chat with Alice.txt"
+```
+
+- `animate` lays out the final cloud once; each word then grows in place
+  as it is used. Writes `<chat>_<language>_wc_animation.mp4`.
+- `animate-dynamic` makes every keyframe a complete cloud and moves words
+  smoothly between keyframes as their relative frequencies change.
+  Writes `<chat>_<language>_wc_dynamic_animation.mp4`. It is slower: a
+  few minutes per language for a chat of a few thousand messages.
+
+Both accept `--language`, `--output-dir`, and tuning options such as
+`--keyframes`, `--frames-per-step`, `--fps`, `--max-words`, and
+`--width`/`--height`. See `uv run chat-to-cloud animate --help` and
+`uv run chat-to-cloud animate-dynamic --help`. Videos are encoded with
+the ffmpeg binary bundled by `imageio-ffmpeg`, so no system ffmpeg is
+needed.
 
 ## Fonts and licensing
 
