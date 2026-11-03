@@ -1,0 +1,67 @@
+[project]
+name = "chat-to-cloud"
+version = "0.1.0"
+description = "Generate static and animated word clouds from WhatsApp chat exports."
+readme = "README.md"
+authors = [
+    { name = "Saeed Gholami Shahbandi", email = "saeed.gh.sh@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "arabic-reshaper>=3.1.0",
+    "imageio[ffmpeg]>=2.38.1",
+    "numpy>=2.5.4",
+    "pillow>=13.0.0",
+    "platformdirs>=4.14.3",
+    "python-bidi>=0.6.12",
+    "wordcloud>=1.9.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "PTH", # prefer pathlib
+    "G",   # logging format
+    "RUF", # ruff-specific
+]
+# Farsi text is intentional throughout, so Arabic letters that resemble Latin
+# ones are not confusables here.
+ignore = ["RUF001"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# These dependencies ship without type information.
+module = ["arabic_reshaper", "bidi.*", "imageio.*", "wordcloud.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "fonts: needs the pinned fonts (downloaded on first use)",
+]

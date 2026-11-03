@@ -1,0 +1,17 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Personal chat exports and generated outputs are never committed.
+chats/
+output/
+*.txt
+!tests/data/*.txt
+*.zip
+*.png
+*.mp4
