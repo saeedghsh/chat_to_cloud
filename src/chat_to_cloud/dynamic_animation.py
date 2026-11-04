@@ -342,9 +342,126 @@ def _pack_initial_layout(
     raise ValueError("Unable to fit the initial dynamic word cloud")
 
 
-def _clamp(center: float, half_extent: float, limit: int) -> float:
-    """Keep a box of the given half extent inside [0, limit]."""
-    return min(limit - half_extent, max(half_extent, center))
+def _clamp(centers: np.ndarray, half_extents: np.ndarray, limit: int) -> np.ndarray:
+    """Keep boxes of the given half extents inside [0, limit]."""
+    clamped: np.ndarray = np.minimum(
+        limit - half_extents, np.maximum(half_extents, centers)
+    )
+    return clamped
+
+
+def _add_in_order(
+    totals: np.ndarray,
+    first: np.ndarray,
+    second: np.ndarray,
+    first_values: np.ndarray,
+    second_values: np.ndarray,
+) -> None:
+    """Add per-pair values to `totals`, pair by pair, first before second.
+
+    The fixed order keeps floating-point sums identical to a sequential loop.
+    """
+    indices = np.empty(2 * len(first), dtype=np.intp)
+    indices[0::2], indices[1::2] = first, second
+    values = np.empty(2 * len(first))
+    values[0::2], values[1::2] = first_values, second_values
+    np.add.at(totals, indices, values)
+
+
+def _push_apart(
+    centers_x: np.ndarray,
+    centers_y: np.ndarray,
+    half_widths: np.ndarray,
+    half_heights: np.ndarray,
+    masses: np.ndarray,
+    *,
+    width: int,
+    height: int,
+    max_iterations: int,
+) -> None:
+    """Separate overlapping boxes in place; see `_reflow_from_previous`.
+
+    Each iteration handles all overlapping pairs at once, ordered as a sweep
+    along x would visit them: by the left edge of the first box, then of the
+    second.
+    """
+    count = len(centers_x)
+    later = np.triu(np.ones((count, count), dtype=bool), k=1)
+    for _ in range(max_iterations):
+        order = np.argsort(centers_x - half_widths, kind="stable")
+        sorted_x = centers_x[order]
+        sorted_half_widths = half_widths[order]
+        lefts = sorted_x - sorted_half_widths
+        rights = sorted_x + sorted_half_widths
+        first_rank, second_rank = np.nonzero(later & (lefts[None, :] < rights[:, None]))
+        first, second = order[first_rank], order[second_rank]
+        delta_x = centers_x[second] - centers_x[first]
+        delta_y = centers_y[second] - centers_y[first]
+        overlap_x = half_widths[first] + half_widths[second] - np.abs(delta_x)
+        overlap_y = half_heights[first] + half_heights[second] - np.abs(delta_y)
+        colliding = (overlap_x > 0) & (overlap_y > 0)
+        if not colliding.any():
+            return
+        first, second = first[colliding], second[colliding]
+        delta_x, delta_y = delta_x[colliding], delta_y[colliding]
+        overlap_x, overlap_y = overlap_x[colliding], overlap_y[colliding]
+
+        first_mass, second_mass = masses[first], masses[second]
+        total_mass = first_mass + second_mass
+        first_share = second_mass / total_mass
+        second_share = first_mass / total_mass
+        along_x = overlap_x < overlap_y
+        delta = np.where(along_x, delta_x, delta_y)
+        tie_direction = np.where(first < second, 1.0, -1.0)
+        direction = np.where(delta == 0, tie_direction, np.where(delta > 0, 1.0, -1.0))
+        movement = direction * (np.where(along_x, overlap_x, overlap_y) + 0.2)
+        first_shift = -(movement * first_share)
+        second_shift = movement * second_share
+
+        shifts_x = np.zeros(count)
+        shifts_y = np.zeros(count)
+        along_y = ~along_x
+        _add_in_order(
+            shifts_x,
+            first[along_x],
+            second[along_x],
+            first_shift[along_x],
+            second_shift[along_x],
+        )
+        _add_in_order(
+            shifts_y,
+            first[along_y],
+            second[along_y],
+            first_shift[along_y],
+            second_shift[along_y],
+        )
+        centers_x[:] = _clamp(centers_x + shifts_x, half_widths, width)
+        centers_y[:] = _clamp(centers_y + shifts_y, half_heights, height)
+
+
+def _boxes_fit(
+    centers_x: np.ndarray,
+    centers_y: np.ndarray,
+    half_widths: np.ndarray,
+    half_heights: np.ndarray,
+    *,
+    width: int,
+    height: int,
+) -> bool:
+    """Return whether all boxes lie inside the canvas without overlapping."""
+    lefts, rights = centers_x - half_widths, centers_x + half_widths
+    tops, bottoms = centers_y - half_heights, centers_y + half_heights
+    if (lefts < 0).any() or (tops < 0).any():
+        return False
+    if (rights > width).any() or (bottoms > height).any():
+        return False
+    separated = (
+        (rights[:, None] <= lefts[None, :])
+        | (rights[None, :] <= lefts[:, None])
+        | (bottoms[:, None] <= tops[None, :])
+        | (bottoms[None, :] <= tops[:, None])
+    )
+    return bool(np.triu(~separated, k=1).sum() == 0)
 
 
 def _reflow_from_previous(
@@ -366,109 +483,70 @@ def _reflow_from_previous(
     resolution restarts.
     """
     words = sorted(styles)
+    desired = [desired_centers.get(word, (width / 2, height / 2)) for word in words]
+    masses = np.array([max(1.0, styles[word].font_size ** 2) for word in words])
     for scale_index in range(100, 3, -2):
         scale = scale_index / 100
-        centers_x: list[float] = []
-        centers_y: list[float] = []
-        half_widths: list[float] = []
-        half_heights: list[float] = []
-        active: list[int] = []
+        half_widths = []
+        half_heights = []
+        active = []
         for index, word in enumerate(words):
             style = styles[word]
-            center_x, center_y = desired_centers.get(word, (width / 2, height / 2))
             font_size = style.font_size * scale
             word_width, word_height = _text_dimensions(word, font_path, font_size)
-            centers_x.append(center_x)
-            centers_y.append(center_y)
             half_widths.append(word_width / 2 + margin)
             half_heights.append(word_height / 2 + margin)
             if style.alpha > 0.02 and font_size >= 3:
                 active.append(index)
 
-        for index in active:
-            centers_x[index] = _clamp(centers_x[index], half_widths[index], width)
-            centers_y[index] = _clamp(centers_y[index], half_heights[index], height)
-
-        for _ in range(max_iterations):
-            shifts_x = [0.0] * len(words)
-            shifts_y = [0.0] * len(words)
-            collision_found = False
-            # Sweep along x: once a later box starts right of the current box's
-            # right edge, no further box in this order can overlap it.
-            order = sorted(
-                active, key=lambda index: centers_x[index] - half_widths[index]
-            )
-            for order_index, first in enumerate(order):
-                first_right = centers_x[first] + half_widths[first]
-                for second in order[order_index + 1 :]:
-                    if centers_x[second] - half_widths[second] >= first_right:
-                        break
-                    delta_x = centers_x[second] - centers_x[first]
-                    delta_y = centers_y[second] - centers_y[first]
-                    overlap_x = half_widths[first] + half_widths[second] - abs(delta_x)
-                    overlap_y = (
-                        half_heights[first] + half_heights[second] - abs(delta_y)
-                    )
-                    if overlap_x <= 0 or overlap_y <= 0:
-                        continue
-                    collision_found = True
-                    first_mass = max(1.0, styles[words[first]].font_size ** 2)
-                    second_mass = max(1.0, styles[words[second]].font_size ** 2)
-                    total_mass = first_mass + second_mass
-                    first_share = second_mass / total_mass
-                    second_share = first_mass / total_mass
-                    if overlap_x < overlap_y:
-                        if delta_x == 0:
-                            direction = 1.0 if first < second else -1.0
-                        else:
-                            direction = 1.0 if delta_x > 0 else -1.0
-                        separation = overlap_x + 0.2
-                        shifts_x[first] -= direction * separation * first_share
-                        shifts_x[second] += direction * separation * second_share
-                    else:
-                        if delta_y == 0:
-                            direction = 1.0 if first < second else -1.0
-                        else:
-                            direction = 1.0 if delta_y > 0 else -1.0
-                        separation = overlap_y + 0.2
-                        shifts_y[first] -= direction * separation * first_share
-                        shifts_y[second] += direction * separation * second_share
-            if not collision_found:
-                break
-            for index in active:
-                centers_x[index] = _clamp(
-                    centers_x[index] + shifts_x[index], half_widths[index], width
-                )
-                centers_y[index] = _clamp(
-                    centers_y[index] + shifts_y[index], half_heights[index], height
-                )
-
-        rectangles: list[Rectangle] = []
-        valid = True
-        for index in active:
-            rectangle = (
-                centers_x[index] - half_widths[index],
-                centers_y[index] - half_heights[index],
-                centers_x[index] + half_widths[index],
-                centers_y[index] + half_heights[index],
-            )
-            if not _position_is_free(rectangle, rectangles, width, height):
-                valid = False
-                break
-            rectangles.append(rectangle)
-        if not valid:
+        # Only visible words take part; the rest keep their desired centers.
+        active_half_widths = np.array(half_widths)[active]
+        active_half_heights = np.array(half_heights)[active]
+        centers_x = _clamp(
+            np.array([desired[index][0] for index in active]),
+            active_half_widths,
+            width,
+        )
+        centers_y = _clamp(
+            np.array([desired[index][1] for index in active]),
+            active_half_heights,
+            height,
+        )
+        _push_apart(
+            centers_x,
+            centers_y,
+            active_half_widths,
+            active_half_heights,
+            masses[active],
+            width=width,
+            height=height,
+            max_iterations=max_iterations,
+        )
+        if not _boxes_fit(
+            centers_x,
+            centers_y,
+            active_half_widths,
+            active_half_heights,
+            width=width,
+            height=height,
+        ):
             continue
 
+        centers = list(desired)
+        for index, center_x, center_y in zip(
+            active, centers_x.tolist(), centers_y.tolist(), strict=True
+        ):
+            centers[index] = (center_x, center_y)
         result: dict[str, _LayoutWord] = {}
-        for index, word in enumerate(words):
+        for word, (center_x, center_y) in zip(words, centers, strict=True):
             style = styles[word]
             old = previous.get(word)
             result[word] = _LayoutWord(
                 word=word,
                 font_size=style.font_size * scale,
                 box_font_size=style.font_size * scale,
-                center_x=centers_x[index],
-                center_y=centers_y[index],
+                center_x=center_x,
+                center_y=center_y,
                 color=old.color if old is not None else _stable_color(word),
                 alpha=style.alpha,
             )
