@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#164c3f">
+  <meta name="description" content="Turn a WhatsApp chat export into word clouds and animations of its English words, Farsi words, and emoji, privately in your browser.">
+  <title>Chat to Cloud</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./"><span class="brand-icon" aria-hidden="true">☁</span> Chat to Cloud</a>
+    <a class="source-link" href="https://github.com/saeedghsh/chat_to_cloud">View source <span aria-hidden="true">↗</span></a>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">YOUR CHAT, IN WORDS</p>
+      <h1>See what your conversations are made of.</h1>
+      <p>Word clouds of the English words, Farsi words, and emoji in a WhatsApp chat. Everything runs in your browser; your chat never leaves your device.</p>
+    </div>
+    <div id="loading" class="notice" role="status">Getting things ready… The first visit may take a moment.</div>
+    <div id="error" class="notice error" role="alert" hidden><span id="error-text"></span> <button id="retry" type="button">Reload</button></div>
+    <div id="app" hidden>
+      <div class="layout">
+        <section class="board" aria-labelledby="board-title">
+          <p class="eyebrow" id="board-kicker">THE CANVAS</p>
+          <h2 id="board-title">Choose a chat to begin.</h2>
+          <p id="chat-summary" class="muted">Export a chat from WhatsApp, then pick the .txt file on the right.</p>
+          <div id="empty-state" class="empty-state"><span aria-hidden="true">☁</span><p>Your cloud will appear here.</p></div>
+          <div id="progress" class="progress" hidden>
+            <p id="progress-text" role="status"></p>
+            <div class="progress-track" aria-hidden="true"><div id="progress-bar"></div></div>
+            <button id="cancel" type="button" class="text-button">Cancel</button>
+          </div>
+          <p id="feedback" role="alert" class="feedback" hidden></p>
+          <figure id="result" class="result" hidden>
+            <img id="result-image" alt="Generated word cloud" hidden>
+            <video id="result-video" controls autoplay loop muted playsinline hidden></video>
+            <figcaption>
+              <a id="download" class="primary button-link" download>Download <span aria-hidden="true">↓</span></a>
+              <small id="emoji-credit" hidden>Emoji graphics by <a href="https://openmoji.org/">OpenMoji</a>, licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. Credit them when you share this.</small>
+            </figcaption>
+          </figure>
+        </section>
+        <aside>
+          <section class="settings">
+            <p class="eyebrow">MAKE IT YOURS</p>
+            <h2>Settings</h2>
+            <label for="chat-file">Chat export (.txt)</label>
+            <input id="chat-file" type="file" accept=".txt,text/plain">
+            <label for="language">Words</label>
+            <select id="language">
+              <option value="en">English</option>
+              <option value="fa" lang="fa">فارسی — Farsi</option>
+              <option value="emoji">Emoji</option>
+            </select>
+            <label for="kind">Output</label>
+            <select id="kind">
+              <option value="image">Image</option>
+              <option value="stable">Animation · words grow in place</option>
+              <option value="dynamic">Animation · words move (slow)</option>
+            </select>
+            <label for="size">Size</label>
+            <select id="size">
+              <option value="960x720">Small · 960 × 720</option>
+              <option value="1280x960" selected>Medium · 1280 × 960</option>
+              <option value="1600x1200">Large · 1600 × 1200</option>
+            </select>
+            <button id="generate" class="primary start" disabled>Generate <span aria-hidden="true">→</span></button>
+            <p class="settings-note" id="settings-note">Images get a fresh layout every time.</p>
+          </section>
+          <section class="rules">
+            <p class="eyebrow">GETTING YOUR CHAT</p>
+            <h3>How to export</h3>
+            <p>In WhatsApp, open the chat, then choose <em>More → Export chat → Without media</em>, and save the .txt file. If you get a .zip, unzip it first.</p>
+            <p>Exports from Android, with lines like <code>7/4/19, 15:50 - Alice: Hello</code>, are supported.</p>
+            <p class="timer-note">Animations are rendered frame by frame on your device and take from about a minute to much longer for big chats.</p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <span>Nothing is uploaded. Python runs in your browser through <a href="https://pyodide.org/">Pyodide</a>.</span>
+    <span>Fonts: <a href="./licenses/DejaVu-LICENSE.txt">DejaVu</a> · <a href="./licenses/NotoNaskhArabic-OFL.txt">Noto Naskh Arabic (OFL)</a> · <a href="./licenses/OpenMoji-LICENSE.txt">OpenMoji (CC BY-SA 4.0)</a></span>
+  </footer>
+</body>
+</html>

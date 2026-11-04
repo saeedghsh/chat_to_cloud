@@ -31,6 +31,22 @@ dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.3",
 ]
+# Real-browser tests of the web app (`pytest -m browser`).
+browser = [
+    "playwright>=1.55",
+]
+
+# Pins for the static web app, exported to `runtime-config.json` by
+# `scripts/build_pages.py`. Pyodide provides Python and most packages; the
+# rest come from PyPI. python-bidi 0.4 is used there because newer releases
+# are compiled and have no WebAssembly build; its `bidi.algorithm` is the
+# module this package imports.
+[tool.chat-to-cloud.browser]
+pyodide-version = "314.0.7"
+python-version = "3.14"
+pyodide-packages = ["imageio", "micropip", "numpy", "pillow", "platformdirs", "wordcloud"]
+pypi-packages = ["arabic-reshaper==3.1.0", "python-bidi==0.4.2"]
+mediabunny-version = "1.65.1"
 
 [tool.ruff]
 line-length = 88
@@ -55,7 +71,7 @@ ignore = ["RUF001"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 # These dependencies ship without type information.
@@ -64,7 +80,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Lets tests import `scripts.build_pages`.
+pythonpath = ["."]
 addopts = "-ra"
 markers = [
     "fonts: needs the pinned fonts (downloaded on first use)",
+    "browser: loads the built site in Chrome; needs RUN_BROWSER_TESTS=1",
 ]

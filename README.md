@@ -60,6 +60,37 @@ Both accept `--language`, `--output-dir`, and tuning options such as
 the ffmpeg binary bundled by `imageio-ffmpeg`, so no system ffmpeg is
 needed.
 
+## Web app
+
+The same Python code also runs as a static web page. It loads
+[Pyodide](https://pyodide.org/) from its CDN and turns a chat export into
+an image or animation inside the browser, so the chat is never uploaded.
+Videos are encoded by the browser's WebCodecs API through the
+[mediabunny](https://mediabunny.dev/) library (MPL-2.0, also from a CDN):
+H.264 MP4 where the browser can encode it, otherwise WebM.
+
+```sh
+uv run python scripts/build_pages.py                     # writes _site/
+uv run python -m http.server 8000 --directory _site      # http://localhost:8000
+```
+
+The build copies `web/`, packs `src/chat_to_cloud` into
+`python/chat_to_cloud.zip`, adds the checksum-verified fonts with their
+licenses, and writes the runtime pins from `[tool.chat-to-cloud.browser]`
+in `pyproject.toml` to `runtime-config.json`. Pyodide supplies Python 3.14
+and most packages. `arabic-reshaper` and the pure-Python `python-bidi`
+0.4.2 come from PyPI. Pyodide's Pillow cannot shape Arabic script, so the
+words are pre-shaped as described in `tokens.display_form`.
+
+Rendering runs on a single core in the browser and is slower than the
+command line, so the page offers smaller sizes. The animation settings
+otherwise use the command-line defaults.
+
+`.github/workflows/pages.yml` runs the checks and tests, builds the site,
+and deploys it on pushes to `master` or `main`. To enable it, set the
+repository's *Settings > Pages > Build and deployment > Source* to
+*GitHub Actions*.
+
 ## Fonts and licensing
 
 Fonts are not stored in this repository. Each is pinned to an immutable
@@ -76,9 +107,10 @@ offline machine where the files were copied by hand.
 | Farsi | Noto Naskh Arabic | [notofonts](https://github.com/notofonts/arabic) | [SIL Open Font License 1.1](https://openfontlicense.org/) |
 | Emoji | OpenMoji 16.0.0 (black glyf) | [hfg-gmuend/openmoji](https://github.com/hfg-gmuend/openmoji/tree/16.0.0) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 
-All three fonts permit free use, including for images you publish. Emoji
-clouds are drawn with OpenMoji graphics, so credit them when you share
-those images, for example:
+All three fonts permit free use, including for images you publish, and
+redistribution. The web app serves copies of them together with their
+license texts from `web/licenses/`. Emoji clouds are drawn with OpenMoji
+graphics, so credit them when you share those images, for example:
 
 > Emoji graphics by [OpenMoji](https://openmoji.org/), licensed under
 > [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
@@ -100,3 +132,15 @@ uv run ruff format .       # format
 uv run mypy                # type check (strict)
 uv run pre-commit install  # optional: run ruff and mypy on every commit
 ```
+
+The web app has an opt-in test that loads the built site in a real
+browser. It needs network access:
+
+```sh
+uv sync --group browser
+uv run playwright install chromium
+RUN_BROWSER_TESTS=1 uv run pytest -m browser
+```
+
+Set `BROWSER_EXECUTABLE=/usr/bin/google-chrome` to use an installed Chrome
+instead.

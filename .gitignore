@@ -15,3 +15,7 @@ output/
 *.zip
 *.png
 *.mp4
+!web/licenses/*.txt
+
+# Built static site
+_site/
