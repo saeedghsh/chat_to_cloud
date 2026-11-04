@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 type Rectangle = tuple[float, float, float, float]
 
+# Fraction of a word's displacement from its target that carries over to the
+# next frame. Starting each frame from the previous displacement keeps words
+# that were pushed or moved aside where they are, instead of letting every
+# frame re-solve the collisions from the targets and land elsewhere; the
+# displacement then fades, halving in about 34 frames.
+_OFFSET_RETENTION = 0.98
+
 
 @dataclass(frozen=True)
 class DynamicSettings:
@@ -250,45 +257,90 @@ def _position_is_free(
     return all(not _rectangles_overlap(rectangle, other) for other in placed)
 
 
-def _spiral_positions(
-    origin_x: float,
-    origin_y: float,
-    width: int,
-    height: int,
-    *,
-    step: float = 0.42,
-    radial_step: float = 1.4,
-) -> Iterator[tuple[float, float]]:
-    """Yield the origin followed by increasingly distant candidates."""
-    yield origin_x, origin_y
+def _boxes(
+    centers_x: np.ndarray,
+    centers_y: np.ndarray,
+    half_widths: np.ndarray,
+    half_heights: np.ndarray,
+) -> np.ndarray:
+    """Return boxes as rows of (left, top, right, bottom)."""
+    return np.column_stack(
+        (
+            centers_x - half_widths,
+            centers_y - half_heights,
+            centers_x + half_widths,
+            centers_y + half_heights,
+        )
+    )
+
+
+def _inside(boxes: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Return which boxes lie within the canvas."""
+    inside: np.ndarray = (
+        (boxes[:, 0] >= 0)
+        & (boxes[:, 1] >= 0)
+        & (boxes[:, 2] <= width)
+        & (boxes[:, 3] <= height)
+    )
+    return inside
+
+
+def _overlaps(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+    """Return a matrix of which boxes of `first` overlap which of `second`.
+
+    Boxes that only touch do not overlap.
+    """
+    separated = (
+        (first[:, None, 2] <= second[None, :, 0])
+        | (second[None, :, 2] <= first[:, None, 0])
+        | (first[:, None, 3] <= second[None, :, 1])
+        | (second[None, :, 3] <= first[:, None, 1])
+    )
+    overlapping: np.ndarray = ~separated
+    return overlapping
+
+
+@lru_cache(maxsize=16)
+def _spiral_offsets(
+    width: int, height: int, *, step: float = 0.42, radial_step: float = 1.4
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return offsets along a spiral, starting at the origin and moving outward."""
     maximum_radius = math.hypot(width, height)
-    index = 1
-    while True:
-        angle = index * step
-        radius = index * radial_step * step
-        if radius > maximum_radius:
-            break
-        yield origin_x + math.cos(angle) * radius, origin_y + math.sin(angle) * radius
-        index += 1
+    index = np.arange(math.ceil(maximum_radius / (radial_step * step)) + 2.0)
+    radius = index * radial_step * step
+    index, radius = index[radius <= maximum_radius], radius[radius <= maximum_radius]
+    offsets = (np.cos(index * step) * radius, np.sin(index * step) * radius)
+    for offset in offsets:
+        offset.setflags(write=False)
+    return offsets
 
 
-def _nearest_free_position(
-    word: str,
-    font_size: float,
-    origin_x: float,
-    origin_y: float,
-    placed: Sequence[Rectangle],
+def _nearest_free_center(
+    center_x: float,
+    center_y: float,
+    half_width: float,
+    half_height: float,
+    placed: np.ndarray,
     *,
-    font_path: Path,
     width: int,
     height: int,
-    margin: float,
 ) -> tuple[float, float] | None:
-    for center_x, center_y in _spiral_positions(origin_x, origin_y, width, height):
-        rectangle = _rectangle(word, font_size, center_x, center_y, font_path, margin)
-        if _position_is_free(rectangle, placed, width, height):
-            return center_x, center_y
-    return None
+    """Find the spiral position nearest the center where a box fits."""
+    offsets_x, offsets_y = _spiral_offsets(width, height)
+    candidates_x, candidates_y = center_x + offsets_x, center_y + offsets_y
+    candidates = _boxes(
+        candidates_x,
+        candidates_y,
+        np.full(len(candidates_x), half_width),
+        np.full(len(candidates_y), half_height),
+    )
+    free = _inside(candidates, width, height)
+    if len(placed):
+        free &= ~_overlaps(candidates, placed).any(axis=1)
+    hits = np.flatnonzero(free)
+    if not len(hits):
+        return None
+    return float(candidates_x[hits[0]]), float(candidates_y[hits[0]])
 
 
 def _pack_initial_layout(
@@ -303,21 +355,21 @@ def _pack_initial_layout(
     current_styles = styles
     for _ in range(12):
         layout: dict[str, _LayoutWord] = {}
-        rectangles: list[Rectangle] = []
+        placed = np.empty((0, 4))
         ordered = sorted(
             current_styles.items(), key=lambda item: (-item[1].font_size, item[0])
         )
         for word, style in ordered:
-            position = _nearest_free_position(
-                word,
-                style.font_size,
+            word_width, word_height = _text_dimensions(word, font_path, style.font_size)
+            half_width, half_height = word_width / 2 + margin, word_height / 2 + margin
+            position = _nearest_free_center(
                 width / 2,
                 height / 2,
-                rectangles,
-                font_path=font_path,
+                half_width,
+                half_height,
+                placed,
                 width=width,
                 height=height,
-                margin=margin,
             )
             if position is None:
                 break
@@ -330,8 +382,16 @@ def _pack_initial_layout(
                 center_y=center_y,
                 color=_stable_color(word),
             )
-            rectangles.append(
-                _rectangle(word, style.font_size, center_x, center_y, font_path, margin)
+            placed = np.vstack(
+                (
+                    placed,
+                    (
+                        center_x - half_width,
+                        center_y - half_height,
+                        center_x + half_width,
+                        center_y + half_height,
+                    ),
+                )
             )
         if len(layout) == len(current_styles):
             return layout
@@ -439,29 +499,64 @@ def _push_apart(
         centers_y[:] = _clamp(centers_y + shifts_y, half_heights, height)
 
 
-def _boxes_fit(
+def _boxes_fit(boxes: np.ndarray, *, width: int, height: int) -> bool:
+    """Return whether all boxes lie inside the canvas without overlapping."""
+    if not _inside(boxes, width, height).all():
+        return False
+    return not np.triu(_overlaps(boxes, boxes), k=1).any()
+
+
+def _relocate_wedged(
     centers_x: np.ndarray,
     centers_y: np.ndarray,
     half_widths: np.ndarray,
     half_heights: np.ndarray,
+    masses: np.ndarray,
     *,
     width: int,
     height: int,
-) -> bool:
-    """Return whether all boxes lie inside the canvas without overlapping."""
-    lefts, rights = centers_x - half_widths, centers_x + half_widths
-    tops, bottoms = centers_y - half_heights, centers_y + half_heights
-    if (lefts < 0).any() or (tops < 0).any():
-        return False
-    if (rights > width).any() or (bottoms > height).any():
-        return False
-    separated = (
-        (rights[:, None] <= lefts[None, :])
-        | (rights[None, :] <= lefts[:, None])
-        | (bottoms[:, None] <= tops[None, :])
-        | (bottoms[None, :] <= tops[:, None])
-    )
-    return bool(np.triu(~separated, k=1).sum() == 0)
+) -> None:
+    """Move the lighter word of each overlapping pair to the nearest free spot.
+
+    Pushing cannot free a small word wedged between larger ones: each
+    neighbor pushes it back into the other. The heavier words keep their
+    places and the wedged ones, heaviest first, move to the nearest position
+    where they fit. Words left without a spot stay where they are.
+    """
+    boxes = _boxes(centers_x, centers_y, half_widths, half_heights)
+    first, second = np.nonzero(np.triu(_overlaps(boxes, boxes), k=1))
+    if not len(first):
+        return
+    wedged = np.unique(np.where(masses[first] < masses[second], first, second))
+    settled = np.ones(len(boxes), dtype=bool)
+    settled[wedged] = False
+    placed = boxes[settled]
+    if np.triu(_overlaps(placed, placed), k=1).any():
+        return
+    for index in sorted(wedged.tolist(), key=lambda index: -masses[index]):
+        spot = _nearest_free_center(
+            centers_x[index],
+            centers_y[index],
+            half_widths[index],
+            half_heights[index],
+            placed,
+            width=width,
+            height=height,
+        )
+        if spot is None:
+            return
+        centers_x[index], centers_y[index] = spot
+        placed = np.vstack(
+            (
+                placed,
+                _boxes(
+                    centers_x[index : index + 1],
+                    centers_y[index : index + 1],
+                    half_widths[index : index + 1],
+                    half_heights[index : index + 1],
+                ),
+            )
+        )
 
 
 def _reflow_from_previous(
@@ -478,9 +573,10 @@ def _reflow_from_previous(
     """Place all words at their desired centers and push overlaps apart.
 
     Overlapping pairs separate along the axis of least overlap, each moving in
-    inverse proportion to its area, so large words stay put. If collisions
-    remain after `max_iterations`, all words shrink uniformly and the
-    resolution restarts.
+    inverse proportion to its area, so large words stay put. Words still
+    overlapping after `max_iterations` move to the nearest free spot. Only if
+    that fails do all words shrink uniformly and the resolution restart, so
+    the cloud keeps its size from frame to frame.
     """
     words = sorted(styles)
     desired = [desired_centers.get(word, (width / 2, height / 2)) for word in words]
@@ -522,15 +618,23 @@ def _reflow_from_previous(
             height=height,
             max_iterations=max_iterations,
         )
+
+        sizes = (active_half_widths, active_half_heights)
         if not _boxes_fit(
-            centers_x,
-            centers_y,
-            active_half_widths,
-            active_half_heights,
-            width=width,
-            height=height,
+            _boxes(centers_x, centers_y, *sizes), width=width, height=height
         ):
-            continue
+            _relocate_wedged(
+                centers_x,
+                centers_y,
+                *sizes,
+                masses[active],
+                width=width,
+                height=height,
+            )
+            if not _boxes_fit(
+                _boxes(centers_x, centers_y, *sizes), width=width, height=height
+            ):
+                continue
 
         centers = list(desired)
         for index, center_x, center_y in zip(
@@ -599,6 +703,9 @@ def _build_continuous_frames(
         for layout in target_layouts
     ]
     previous = target_layouts[0]
+    # How far collisions pushed each word away from its target in the last
+    # frame; see `_OFFSET_RETENTION`.
+    offsets: dict[str, tuple[float, float]] = {}
     frames = [
         _FrameSpec(tuple(previous.values()), timestamps[0], boundaries[0])
         for _ in range(hold_frames)
@@ -631,7 +738,7 @@ def _build_continuous_frames(
                 progress,
                 relocated_words,
             )
-            desired_centers = {}
+            targets: dict[str, tuple[float, float]] = {}
             for word in styles:
                 center = _desired_center(
                     word,
@@ -641,7 +748,14 @@ def _build_continuous_frames(
                     word in relocated_words,
                 )
                 if center is not None:
-                    desired_centers[word] = center
+                    targets[word] = center
+            desired_centers = {}
+            for word, (target_x, target_y) in targets.items():
+                offset_x, offset_y = offsets.get(word, (0.0, 0.0))
+                desired_centers[word] = (
+                    target_x + offset_x * _OFFSET_RETENTION,
+                    target_y + offset_y * _OFFSET_RETENTION,
+                )
             previous = _reflow_from_previous(
                 previous,
                 styles,
@@ -651,6 +765,14 @@ def _build_continuous_frames(
                 height=height,
                 margin=margin,
             )
+            offsets = {
+                word: (
+                    item.center_x - targets[word][0],
+                    item.center_y - targets[word][1],
+                )
+                for word, item in previous.items()
+                if word in targets
+            }
             messages_seen = boundaries[keyframe_index - 1] + (
                 boundaries[keyframe_index] - boundaries[keyframe_index - 1]
             ) * _ease(progress)
