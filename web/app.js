@@ -161,8 +161,8 @@ async function cancel() {
 function updateNote() {
   const notes = {
     image: "Images get a fresh layout every time.",
-    stable: "Takes about a minute for a few thousand messages.",
-    dynamic: "Can take many minutes; try Small first.",
+    stable: "Takes under a minute for a few thousand messages.",
+    dynamic: "Takes a minute or two for a few thousand messages.",
   };
   $("settings-note").textContent = notes[$("kind").value];
 }

@@ -50,8 +50,8 @@ uv run chat-to-cloud animate-dynamic "chats/WhatsApp Chat with Alice.txt"
   as it is used. Writes `<chat>_<language>_wc_animation.mp4`.
 - `animate-dynamic` makes every keyframe a complete cloud and moves words
   smoothly between keyframes as their relative frequencies change.
-  Writes `<chat>_<language>_wc_dynamic_animation.mp4`. It is slower: a
-  few minutes per language for a chat of a few thousand messages.
+  Writes `<chat>_<language>_wc_dynamic_animation.mp4`. It is slower:
+  about a minute per language for a chat of a few thousand messages.
 
 Both accept `--language`, `--output-dir`, and tuning options such as
 `--keyframes`, `--frames-per-step`, `--fps`, `--max-words`, and
