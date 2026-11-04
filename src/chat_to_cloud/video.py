@@ -1,10 +1,12 @@
 """Timeline, footer, and MP4 helpers shared by the animations."""
 
 import logging
+import math
 import tempfile
 from collections import Counter
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import imageio.v2 as imageio
@@ -83,6 +85,60 @@ def check_dimensions(width: int, height: int) -> None:
             raise ValueError(
                 f"MP4 dimensions must be even and at least {MIN_DIMENSION} pixels"
             )
+
+
+@dataclass(frozen=True)
+class WordSprite:
+    """A word rasterized once at one size.
+
+    `box` is the text bounding box for a left-top anchor at the origin, and
+    `offset` is where the mask's corner lies relative to that anchor.
+    """
+
+    mask: Image.Image
+    box: tuple[float, float, float, float]
+    offset: tuple[int, int]
+
+
+@lru_cache(maxsize=512)
+def word_sprite(word: str, font_path: Path, size: int) -> WordSprite:
+    """Rasterize `word` as a grayscale coverage mask, cached per size.
+
+    Animations redraw the same words at the same sizes in many frames, and
+    rasterizing glyphs is the bulk of the rendering time.
+    """
+    font = ImageFont.truetype(font_path, size)
+    measuring_draw = ImageDraw.Draw(Image.new("L", (1, 1)))
+    left, top, right, bottom = measuring_draw.textbbox(
+        (0, 0), word, font=font, anchor="lt"
+    )
+    # A margin guards against antialiasing just outside the bounding box.
+    margin = 2
+    corner_x, corner_y = math.floor(left) - margin, math.floor(top) - margin
+    mask = Image.new(
+        "L",
+        (math.ceil(right) + margin - corner_x, math.ceil(bottom) + margin - corner_y),
+        0,
+    )
+    ImageDraw.Draw(mask).text(
+        (-corner_x, -corner_y), word, font=font, fill=255, anchor="lt"
+    )
+    return WordSprite(mask, (left, top, right, bottom), (corner_x, corner_y))
+
+
+def draw_word(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    sprite: WordSprite,
+    fill: tuple[int, ...],
+) -> None:
+    """Draw a sprite as `draw.text` would draw its word at `position`.
+
+    Both blend the fill color through the same coverage mask, so the pixels
+    are identical.
+    """
+    x, y = position
+    draw.bitmap((x + sprite.offset[0], y + sprite.offset[1]), sprite.mask, fill=fill)
 
 
 def footer_height_for(height: int) -> int:
