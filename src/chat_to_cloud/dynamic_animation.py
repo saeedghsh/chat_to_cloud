@@ -676,16 +676,14 @@ def _render_frame(task: _RenderTask) -> np.ndarray:
         if item.alpha <= 0.02 or item.font_size < 3:
             continue
         font_size = max(1, round(item.font_size))
-        font = ImageFont.truetype(task.font_path, font_size)
         left, top, right, bottom = _text_box(item.word, task.font_path, font_size)
         x = item.center_x - (left + right) / 2
         y = item.center_y - (top + bottom) / 2
-        draw.text(
+        video.draw_word(
+            draw,
             (round(x), round(y)),
-            item.word,
-            font=font,
-            fill=(*item.color, round(255 * item.alpha)),
-            anchor="lt",
+            video.word_sprite(item.word, task.font_path, font_size),
+            (*item.color, round(255 * item.alpha)),
         )
 
     image = Image.alpha_composite(image, words_layer)

@@ -5,8 +5,17 @@ from pathlib import Path
 import imageio.v3 as iio
 import numpy as np
 import pytest
+from PIL import Image, ImageDraw, ImageFont
 
-from chat_to_cloud.video import build_timeline, check_dimensions, write_mp4
+from chat_to_cloud import fonts
+from chat_to_cloud.tokens import Language, display_form
+from chat_to_cloud.video import (
+    build_timeline,
+    check_dimensions,
+    draw_word,
+    word_sprite,
+    write_mp4,
+)
 from chat_to_cloud.whatsapp import Message
 
 
@@ -62,3 +71,33 @@ def test_write_mp4_leaves_nothing_behind_on_failure(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="render failed"):
         write_mp4(failing_frames(), tmp_path / "out.mp4", fps=4)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.fonts
+@pytest.mark.parametrize("language", ["en", "fa", "emoji"])
+def test_cached_word_drawing_matches_draw_text(language: Language) -> None:
+    font_path = fonts.font_path(fonts.LANGUAGE_FONTS[language])
+    word = {
+        "en": "Coffee",
+        "fa": display_form("قهوه\N{ZERO WIDTH NON-JOINER}ها"),
+        "emoji": "😀",
+    }[language]
+    # Overlapping, translucent words exercise blending order as well.
+    placements = [
+        ((10, 12), 40, (200, 30, 30, 255)),
+        ((25, 20), 33, (30, 90, 200, 140)),
+    ]
+    expected = Image.new("RGBA", (160, 100), (0, 0, 0, 0))
+    actual = expected.copy()
+    expected_draw, actual_draw = ImageDraw.Draw(expected), ImageDraw.Draw(actual)
+    for position, size, fill in placements:
+        expected_draw.text(
+            position,
+            word,
+            font=ImageFont.truetype(font_path, size),
+            fill=fill,
+            anchor="lt",
+        )
+        draw_word(actual_draw, position, word_sprite(word, font_path, size), fill)
+
+    assert actual.tobytes() == expected.tobytes()

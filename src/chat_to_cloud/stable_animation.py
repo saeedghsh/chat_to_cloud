@@ -144,19 +144,11 @@ def _render_frame(
         if font_size < 3:
             continue
         alpha = round(255 * min(1.0, count))
-        font = ImageFont.truetype(canvas.font_path, font_size)
-        left, top, right, bottom = draw.textbbox(
-            (0, 0), item.word, font=font, anchor="lt"
-        )
+        sprite = video.word_sprite(item.word, canvas.font_path, font_size)
+        left, top, right, bottom = sprite.box
         x = item.x + (item.width - (right - left)) / 2 - left
         y = item.y + (item.height - (bottom - top)) / 2 - top
-        draw.text(
-            (round(x), round(y)),
-            item.word,
-            font=font,
-            fill=(*item.color, alpha),
-            anchor="lt",
-        )
+        video.draw_word(draw, (round(x), round(y)), sprite, (*item.color, alpha))
 
     image = Image.alpha_composite(image, words_layer)
     video.draw_footer(
