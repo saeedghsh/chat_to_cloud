@@ -225,26 +225,26 @@ def _frames(
         yield final_frame
 
 
-def render_stable_animation(
+def stable_animation(
     messages: Sequence[Message],
     language: Language,
-    output_path: Path,
     *,
     font_path: Path,
     label_font_path: Path,
     title: str,
     settings: StableSettings | None = None,
-) -> bool:
-    """Write the animation as MP4; return False when there is nothing to show."""
+) -> video.Animation | None:
+    """Lay out the animation; return None when there is nothing to show.
+
+    Frames are rendered lazily as `Animation.frames` is consumed.
+    """
     settings = settings or StableSettings()
     if not messages:
-        logger.info("Skipping %s: no messages were parsed", output_path)
-        return False
+        return None
     grouped_tokens = tokens_by_message(messages, language)
     final_frequencies = Counter(token for tokens in grouped_tokens for token in tokens)
     if not final_frequencies:
-        logger.info("Skipping %s: no %s tokens", output_path, language)
-        return False
+        return None
 
     footer_height = video.footer_height_for(settings.height)
     timeline = video.build_timeline(messages, grouped_tokens, settings.keyframes)
@@ -266,19 +266,50 @@ def render_stable_animation(
         title=title,
         total_messages=timeline.boundaries[-1],
     )
+    hold_frames = max(1, round(settings.hold_seconds * settings.fps))
     frames = _frames(
         layout,
         timeline,
         canvas,
         frames_per_step=settings.frames_per_step,
-        hold_frames=max(1, round(settings.hold_seconds * settings.fps)),
+        hold_frames=hold_frames,
     )
-    frame_count = video.write_mp4(frames, output_path, settings.fps)
+    frame_count = (
+        2 * hold_frames + (len(timeline.snapshots) - 1) * settings.frames_per_step
+    )
+    logger.debug("Laid out %d words for %s", len(layout), title)
+    return video.Animation(
+        frames, frame_count, settings.fps, settings.width, settings.height
+    )
+
+
+def render_stable_animation(
+    messages: Sequence[Message],
+    language: Language,
+    output_path: Path,
+    *,
+    font_path: Path,
+    label_font_path: Path,
+    title: str,
+    settings: StableSettings | None = None,
+) -> bool:
+    """Write the animation as MP4; return False when there is nothing to show."""
+    animation = stable_animation(
+        messages,
+        language,
+        font_path=font_path,
+        label_font_path=label_font_path,
+        title=title,
+        settings=settings,
+    )
+    if animation is None:
+        logger.info("Skipping %s: no %s tokens", output_path, language)
+        return False
+    frame_count = video.write_mp4(animation.frames, output_path, animation.fps)
     logger.info(
-        "Wrote %s (%d frames, %.1fs, %d words)",
+        "Wrote %s (%d frames, %.1fs)",
         output_path,
         frame_count,
-        frame_count / settings.fps,
-        len(layout),
+        frame_count / animation.fps,
     )
     return True

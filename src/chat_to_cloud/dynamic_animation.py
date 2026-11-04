@@ -661,25 +661,26 @@ def _assert_no_overlaps(
             rectangles.append(rectangle)
 
 
-def render_dynamic_animation(
+def dynamic_animation(
     messages: Sequence[Message],
     language: Language,
-    output_path: Path,
     *,
     font_path: Path,
     label_font_path: Path,
     title: str,
     settings: DynamicSettings | None = None,
-) -> bool:
-    """Write the animation as MP4; return False when there is nothing to show."""
+) -> video.Animation | None:
+    """Plan every frame; return None when there is nothing to show.
+
+    Planning happens here, while frames are rasterized lazily as
+    `Animation.frames` is consumed, in parallel when `settings.workers` allows.
+    """
     settings = settings or DynamicSettings()
     if not messages:
-        logger.info("Skipping %s: no messages were parsed", output_path)
-        return False
+        return None
     grouped_tokens = tokens_by_message(messages, language)
     if not any(grouped_tokens):
-        logger.info("Skipping %s: no %s tokens", output_path, language)
-        return False
+        return None
 
     timeline = video.build_timeline(
         messages, grouped_tokens, settings.keyframes
@@ -734,15 +735,49 @@ def render_dynamic_animation(
         )
         for frame in frames
     ]
-    frame_count = video.write_mp4(
-        _render_tasks(tasks, workers), output_path, settings.fps
+    logger.debug(
+        "Planned %d frames from %d keyframes for %s; %d render workers",
+        len(tasks),
+        len(styles),
+        title,
+        workers,
     )
+    return video.Animation(
+        _render_tasks(tasks, workers),
+        len(tasks),
+        settings.fps,
+        settings.width,
+        settings.height,
+    )
+
+
+def render_dynamic_animation(
+    messages: Sequence[Message],
+    language: Language,
+    output_path: Path,
+    *,
+    font_path: Path,
+    label_font_path: Path,
+    title: str,
+    settings: DynamicSettings | None = None,
+) -> bool:
+    """Write the animation as MP4; return False when there is nothing to show."""
+    animation = dynamic_animation(
+        messages,
+        language,
+        font_path=font_path,
+        label_font_path=label_font_path,
+        title=title,
+        settings=settings,
+    )
+    if animation is None:
+        logger.info("Skipping %s: no %s tokens", output_path, language)
+        return False
+    frame_count = video.write_mp4(animation.frames, output_path, animation.fps)
     logger.info(
-        "Wrote %s (%d frames, %.1fs, %d keyframes, %d render workers)",
+        "Wrote %s (%d frames, %.1fs)",
         output_path,
         frame_count,
-        frame_count / settings.fps,
-        len(styles),
-        workers,
+        frame_count / animation.fps,
     )
     return True

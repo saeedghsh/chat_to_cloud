@@ -3,7 +3,7 @@
 import logging
 import tempfile
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +40,17 @@ class Timeline:
         return Timeline(
             self.boundaries[first:], self.snapshots[first:], self.timestamps[first:]
         )
+
+
+@dataclass(frozen=True)
+class Animation:
+    """Lazily rendered RGB frames and the facts needed to encode them."""
+
+    frames: Iterator[np.ndarray]
+    frame_count: int
+    fps: int
+    width: int
+    height: int
 
 
 def build_timeline(

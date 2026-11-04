@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from PIL import Image
 from wordcloud import WordCloud
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,25 @@ def make_wordcloud(
     ).generate_from_frequencies(cleaned)
 
 
+def static_cloud(
+    tokens: Iterable[str],
+    font_path: Path,
+    *,
+    width: int = 1600,
+    height: int = 1200,
+    random_state: int | None = None,
+) -> Image.Image | None:
+    """Render tokens as an image; return None when there is nothing to render."""
+    frequencies = Counter(token for token in tokens if token)
+    if not frequencies:
+        return None
+    cloud = make_wordcloud(
+        frequencies, font_path, width, height, random_state=random_state
+    )
+    image: Image.Image = cloud.to_image()
+    return image
+
+
 def write_static_cloud(
     tokens: Iterable[str],
     font_path: Path,
@@ -51,14 +71,13 @@ def write_static_cloud(
     random_state: int | None = None,
 ) -> bool:
     """Render tokens to a PNG; return False when there is nothing to render."""
-    frequencies = Counter(token for token in tokens if token)
-    if not frequencies:
+    image = static_cloud(
+        tokens, font_path, width=width, height=height, random_state=random_state
+    )
+    if image is None:
         logger.info("No tokens to render for %s", output_path)
         return False
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cloud = make_wordcloud(
-        frequencies, font_path, width, height, random_state=random_state
-    )
-    cloud.to_file(str(output_path))
-    logger.info("Wrote %s (%d distinct tokens)", output_path, len(frequencies))
+    image.save(output_path, optimize=True)
+    logger.info("Wrote %s", output_path)
     return True
